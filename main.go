@@ -237,7 +237,7 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle, interfaceName stri
 }
 
 func scanInterface(interfaceName string, metrics *metrics) error {
-	log.Infof("Scanning interface %s", interfaceName)
+	log.Info("Scanning interface %s", interfaceName)
 	if handle, err := pcapgo.NewEthernetHandle(interfaceName); err != nil {
 		log.Fatal(err)
 	} else {
@@ -257,6 +257,7 @@ func readPacket(handle *pcapgo.EthernetHandle, interfaceName string, metrics *me
 			log.Infof("Stopping interface %s", interfaceName)
 			return
 		default:
+			log.Debug("Reading packet from interface %s", interfaceName)
 			if summary, err := decoder.decode(handle, interfaceName); err != nil {
 				continue
 			} else if summary != nil {
@@ -277,12 +278,15 @@ func getDefaultInterfaces() ([]string, error) {
 	var defaultInterfaces []string
 	for _, i := range interfaces {
 		if i.Flags&net.FlagUp == 0 {
+			log.Debug("Interface %s is down, ignoring", i.Name)
 			continue // interface down
 		}
 		if i.Flags&net.FlagLoopback != 0 {
+			log.Debug("Interface %s is loopback, ignoring", i.Name)
 			continue // loopback interface
 		}
 		if i.Flags&net.FlagPointToPoint != 0 {
+			log.Debug("Interface %s is point-to-point, ignoring", i.Name)
 			continue // point-to-point interface
 		}
 		addrs, err := i.Addrs()
@@ -291,8 +295,10 @@ func getDefaultInterfaces() ([]string, error) {
 			return nil, err
 		}
 		if len(addrs) == 0 {
+			log.Debug("Interface %s has no addresses, ignoring", i.Name)
 			continue // interface has no addresses
 		}
+		log.Debug("Interface %s is a valid interface", i.Name)
 		defaultInterfaces = append(defaultInterfaces, i.Name)
 	}
 
