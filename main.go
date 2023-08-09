@@ -168,7 +168,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, error) {
 	log.Trace("Decoding packet")
 
-	if packetData, _, err := handle.ZeroCopyReadPacketData(); err != nil {
+	if packetData, _, err := handle.ReadPacketData(); err != nil {
 		if err == io.EOF {
 			return nil, err
 		}
@@ -180,9 +180,11 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 		var protocol = "unknown"
 		var packetLength int
 
-		if _, err := p.decoder(packetData, &p.decoded); err != nil {
+		if lt, err := p.decoder(packetData, &p.decoded); err != nil {
 			log.Debug("Error decoding packet: ", err)
 			return nil, err
+		} else {
+			log.Trace("Unsupported layer type: ", lt)
 		}
 
 		packetLength = len(packetData)
