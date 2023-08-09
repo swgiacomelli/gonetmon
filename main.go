@@ -13,13 +13,14 @@
 package main
 
 import (
-	"flag"
 	"io"
 	"net"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
+
+	flag "github.com/spf13/pflag"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -59,15 +60,16 @@ type packetDecoder struct {
 
 var (
 	log                 = logrus.New() // logger
+	interfaceNames      []string       // interfaces to monitor
 	logLevel            = "info"       // default log level
 	prometheusPort      = 9338         // default port to export metrics
 	monitoredInterfaces []string       // interfaces to monitor
 )
 
 func init() {
-	interfaceNames := parseFlags()         // parse command line flags
-	initLogger()                           // initialize the logger
-	setMonitoredInterfaces(interfaceNames) // set the interfaces to monitor
+	parseFlags()             // parse command line flags
+	initLogger()             // initialize the logger
+	setMonitoredInterfaces() // set the interfaces to monitor
 }
 
 func main() {
@@ -92,16 +94,15 @@ func main() {
 	wg.Wait()
 }
 
-func setMonitoredInterfaces(interfaceNames string) {
+func setMonitoredInterfaces() {
 	// get interfaces to monitor
 	if defaultInterfaces, err := getDefaultInterfaces(); err != nil {
 		log.Fatal(err)
 	} else {
-		for _, i := range strings.Split(interfaceNames, ",") {
-			var trimmedInterfaceName = strings.TrimSpace(i)
+		for _, i := range interfaceNames {
 			for _, j := range defaultInterfaces {
-				if strings.EqualFold(trimmedInterfaceName, j) {
-					monitoredInterfaces = append(monitoredInterfaces, trimmedInterfaceName)
+				if strings.EqualFold(i, j) {
+					monitoredInterfaces = append(monitoredInterfaces, i)
 				}
 			}
 		}
@@ -115,14 +116,12 @@ func setMonitoredInterfaces(interfaceNames string) {
 	}
 }
 
-func parseFlags() string {
-	var interfaceNames = ""
+func parseFlags() {
 	// get the command line params
-	flag.StringVar(&interfaceNames, "interfaces", "", "names of the network interfaces to monitor (comma separated)")
+	flag.StringArrayVar(&interfaceNames, "interfaces", nil, "names of the network interfaces to monitor")
 	flag.IntVar(&prometheusPort, "port", 9338, "port to export metrics")
 	flag.StringVar(&logLevel, "log-level", "info", "log level (debug, info, warn, error, fatal, panic)")
 	flag.Parse()
-	return interfaceNames
 }
 
 func initLogger() {
