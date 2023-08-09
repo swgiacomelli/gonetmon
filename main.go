@@ -191,6 +191,8 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 
 		packetLength = len(packetData)
 
+		log.Trace("Decoded layers: ", p.decoded)
+
 		for _, layerType := range p.decoded {
 			log.Trace("Layer type: ", layerType)
 			switch layerType {
@@ -346,7 +348,7 @@ func readPackets(handle *pcapgo.EthernetHandle,
 	interfaceName string, metrics *metrics) {
 	decoder := newPacketDecoder(interfaceName)
 	for {
-		log.Debug("Reading packet from interface ", interfaceName)
+		log.Trace("Reading packet from interface ", interfaceName)
 		if summary, err := decoder.decode(handle); err != nil {
 			continue
 		} else if summary != nil {
