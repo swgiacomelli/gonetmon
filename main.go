@@ -75,6 +75,18 @@ type packetSummary struct {
 	length         int
 }
 
+func (p *packetSummary) String() string {
+	return strings.Join([]string{
+		p.interfaceName,
+		p.sourceMAC,
+		p.destinationMAC,
+		p.sourceIP,
+		p.destinationIP,
+		p.protocol,
+		strconv.Itoa(p.length),
+	}, ",")
+}
+
 func newPacketSummary(interfaceName string,
 	sourceMAC,
 	destinationMAC net.HardwareAddr,
