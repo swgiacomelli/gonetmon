@@ -143,11 +143,11 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 
 	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerArray(nil))
 
-	dlc.Put(&ethernetLayer)
-	dlc.Put(&ip4Layer)
-	dlc.Put(&ip6Layer)
-	dlc.Put(&tcpLayer)
-	dlc.Put(&udpLayer)
+	dlc = dlc.Put(&ethernetLayer)
+	dlc = dlc.Put(&ip4Layer)
+	dlc = dlc.Put(&ip6Layer)
+	dlc = dlc.Put(&tcpLayer)
+	dlc = dlc.Put(&udpLayer)
 
 	decoder := dlc.LayersDecoder(layers.LayerTypeEthernet, gopacket.NilDecodeFeedback)
 	decoded := make([]gopacket.LayerType, 0, 20)
