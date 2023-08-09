@@ -140,6 +140,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	var ip6Layer layers.IPv6
 	var tcpLayer layers.TCP
 	var udpLayer layers.UDP
+	var payloadLayer gopacket.Payload
 
 	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerArray(nil))
 
@@ -148,6 +149,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	dlc = dlc.Put(&ip6Layer)
 	dlc = dlc.Put(&tcpLayer)
 	dlc = dlc.Put(&udpLayer)
+	dlc = dlc.Put(&payloadLayer)
 
 	decoder := dlc.LayersDecoder(layers.LayerTypeEthernet, gopacket.NilDecodeFeedback)
 	decoded := make([]gopacket.LayerType, 0, 20)
@@ -183,8 +185,8 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 		if lt, err := p.decoder(packetData, &p.decoded); err != nil {
 			log.Debug("Error decoding packet: ", err)
 			return nil, err
-		} else {
-			log.Trace("Unsupported layer type: ", lt)
+		} else if lt != gopacket.LayerTypeZero {
+			log.Warn("Unsupported layer type: ", lt)
 		}
 
 		packetLength = len(packetData)
