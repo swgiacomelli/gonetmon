@@ -23,7 +23,7 @@ import (
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
+	"github.com/google/gopacket/pcapgo"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -177,7 +177,7 @@ func newPacketDecoder() *packetDecoder {
 	}
 }
 
-func (p *packetDecoder) decode(handle *pcap.Handle, interfaceName string) (*packetSummary, error) {
+func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle, interfaceName string) (*packetSummary, error) {
 	if packetData, _, err := handle.ZeroCopyReadPacketData(); err != nil {
 		if err == io.EOF {
 			return nil, err
@@ -239,20 +239,18 @@ func (p *packetDecoder) decode(handle *pcap.Handle, interfaceName string) (*pack
 
 func scanInterface(interfaceName string, metrics *metrics) error {
 	log.Infof("Scanning interface %s", interfaceName)
-	handle, err := pcap.OpenLive(interfaceName, 65536, true, pcap.BlockForever)
-	if err != nil {
+	if handle, err := pcapgo.NewEthernetHandle(interfaceName); err != nil {
 		log.Fatal(err)
+	} else {
+		defer handle.Close()
+		stop := make(chan struct{})
+		go readPacket(handle, interfaceName, metrics, stop)
+		defer close(stop)
 	}
-	defer handle.Close()
-
-	stop := make(chan struct{})
-	go readPacket(handle, interfaceName, metrics, stop)
-	defer close(stop)
-
 	return nil
 }
 
-func readPacket(handle *pcap.Handle, interfaceName string, metrics *metrics, stop chan struct{}) {
+func readPacket(handle *pcapgo.EthernetHandle, interfaceName string, metrics *metrics, stop chan struct{}) {
 	decoder := newPacketDecoder()
 	for {
 		select {
