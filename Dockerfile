@@ -1,4 +1,4 @@
-FROM golang:1.9.7-alpine3.7 AS builder
+FROM golang:1.19-alpine as builder
 
 WORKDIR /go/src/github.com/swgiacomelli/gonetmon
 COPY . .
