@@ -1,302 +1,303 @@
-/*
-*    Go Network Monitor - personal project
-*    Released under the MIT License:  https://gherlein.mit-license.org/
- */
+// ***********************************************************************
+// Go Network Monitor - personal project
+// Originally written by Greg Herlein (https://github.com/gherlein/gonetmon
+// Released under the MIT License:  https://gherlein.mit-license.org/
+// ***********************************************************************
+// Modified by Steven Giacomelli (steve@giaacomelli.ca) to simplify containerization
+// ***********************************************************************
+// This program is a simple network monitor that will listen on a network
+// interface and count the number of bytes seen on the network.  It will
+// also count the number of bytes seen on each node of the network.
+// ***********************************************************************
 
 package main
 
 import (
-	"bufio"
 	"flag"
-	"fmt"
-	"github.com/coreos/go-systemd/daemon"
+	"io"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"sync"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
-	"github.com/onsi/gocleanup"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/spf13/viper"
-	"log"
-	"math"
-	"net"
-	"net/http"
-	"os"
-	"strings"
-	"time"
+	"github.com/sirupsen/logrus"
 )
 
-type node struct {
-	hostname string
-	addr     string
-	IP       net.IP
-	incount  uint64
-	outcount uint64
+// metrics is a struct to hold all the prometheus metrics
+type metrics struct {
+	networkTraffic *prometheus.CounterVec // counter for total network traffic
+}
+
+// packetSummary is a struct to hold a summary of a packet
+type packetSummary struct {
+	interfaceName  string
+	sourceMAC      string
+	destinationMAC string
+	sourceIP       string
+	destinationIP  string
+	protocol       string
+	length         int
+}
+
+// packetDecoder is a struct to hold the packet decoder
+type packetDecoder struct {
+	ethernetLayer          layers.Ethernet
+	ip4Layer               layers.IPv4
+	ip6Layer               layers.IPv6
+	tcpLayer               layers.TCP
+	udpLayer               layers.UDP
+	decodingLayerContainer gopacket.DecodingLayerContainer
+	decoder                gopacket.DecodingLayerFunc
+	decoded                []gopacket.LayerType
 }
 
 var (
-	cli         bool   = true
-	logfile     string = "/var/log/gonetmon.log"
-	f           *os.File
-	device      string = ""
-	cidr        string = ""
-	port        string = ""
-	snapshotLen int32  = 1024
-	promiscuous bool   = true
-	err         error
-	timeout     time.Duration = 30 * time.Second
-	handle      *pcap.Handle
-	nodes       []node
-	debug       bool = false
-	debug2      bool = false
-	netBytes         = prometheus.NewCounter(prometheus.CounterOpts{
-		Name: "network_bytes_total",
-		Help: "Number of bytes seen on the network.",
-	})
-	nodeBytes = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "node_bytes_total",
-			Help: "Number of bytes seen on that network node.",
-		},
-		[]string{"device"},
-	)
+	log                 = logrus.New() // logger
+	logLevel            = "info"       // default log level
+	prometheusPort      = 9338         // default port to export metrics
+	monitoredInterfaces []string       // interfaces to monitor
 )
 
 func init() {
-
-	flag.StringVar(&device, "device", "", "name of the network device to monitor")
-	flag.StringVar(&cidr, "cidr", "", "CIDR of the network device to monitor")
-	flag.StringVar(&port, "port", "", "port on localhost that metrics will be exported on")
-	flag.Parse()
-
-	// if there were no command line params, read from the config file
-	if device == "" || cidr == "" || port == "" {
-		cli = false
-		viper.SetConfigName("gonetmon") // no need to include file extension
-		viper.AddConfigPath(".")
-		viper.AddConfigPath("/etc/")
-
-		err := viper.ReadInConfig()
-		if err != nil {
-
-		} else {
-			device = viper.GetString("network.device")
-			cidr = viper.GetString("network.cidr")
-			port = viper.GetString("exporter.port")
-		}
-	}
-	prometheus.MustRegister(netBytes)
-	prometheus.MustRegister(nodeBytes)
-}
-
-func calcNetwork(d string, c string) (int, string, error) {
-	var (
-		mask     net.IPMask
-		masklen  int
-		numhosts int
-		baseaddr string
-	)
-	ipv4Addr, ipv4Net, err := net.ParseCIDR(c)
-	if err != nil {
-		log.Fatal(err)
-		return 0, "", err
-	}
-
-	mask = ipv4Addr.DefaultMask()
-	masklen, _ = mask.Size()
-	numhosts = int(math.Pow(2, float64(32-masklen)))
-	baseaddr = strings.TrimSuffix(ipv4Addr.String(), ".0")
-
-	if debug {
-		fmt.Println(ipv4Addr)
-		fmt.Println(ipv4Net)
-		fmt.Println(numhosts)
-		fmt.Println(baseaddr)
-		fmt.Println(c)
-	}
-	return numhosts, baseaddr, nil
+	interfaceNames := parseFlags()         // parse command line flags
+	initLogger()                           // initialize the logger
+	setMonitoredInterfaces(interfaceNames) // set the interfaces to monitor
 }
 
 func main() {
+	reg := prometheus.NewRegistry()
+	metrics := newMetrics(reg)
 
-	var (
-		numhosts int
-		baseaddr string
-	)
+	go func() {
+		http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{Registry: reg}))
+		log.Fatal(http.ListenAndServe(":"+strconv.Itoa(prometheusPort), nil))
+	}()
 
-	if device == "" || cidr == "" || port == "" {
-		fmt.Printf("device name and/or cidr and/or port not specified\n")
-		os.Exit(3)
+	var wg sync.WaitGroup
+	for _, i := range monitoredInterfaces {
+		wg.Add(1)
+		go func(interfaceName string) {
+			defer wg.Done()
+			if err := scanInterface(interfaceName, metrics); err != nil {
+				log.Fatal(err)
+			}
+		}(i)
 	}
-	if cli == false {
-		//create your file with desired read/write permissions
-		f, err := os.OpenFile(logfile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0644)
-		if err != nil {
-			log.Fatal(err)
+	wg.Wait()
+}
+
+func setMonitoredInterfaces(interfaceNames string) {
+	// get interfaces to monitor
+	if defaultInterfaces, err := getDefaultInterfaces(); err != nil {
+		log.Fatal(err)
+	} else {
+		for _, i := range strings.Split(interfaceNames, ",") {
+			var trimmedInterfaceName = strings.TrimSpace(i)
+			for _, j := range defaultInterfaces {
+				if strings.EqualFold(trimmedInterfaceName, j) {
+					monitoredInterfaces = append(monitoredInterfaces, trimmedInterfaceName)
+				}
+			}
 		}
-		log.SetOutput(f)
-		defer func() {
-			log.Println("exiting")
-			f.Sync()
-			f.Close()
-		}()
 	}
 
-	numhosts, baseaddr, err = calcNetwork(device, cidr)
+	if len(monitoredInterfaces) == 0 {
+		if len(interfaceNames) == 0 {
+			log.Fatal("No interfaces specified to monitor")
+		}
+		log.Fatal("Cannot monitor any of the specified interfaces (", interfaceNames, ")")
+	}
+}
 
-	log.Printf("Startup - Device: %s - CIDR: %s - numhosts: %d - baseaddr: %s - port %s\n",
-		device,
-		cidr,
-		numhosts,
-		baseaddr,
-		port)
+func parseFlags() string {
+	var interfaceNames = ""
+	// get the command line params
+	flag.StringVar(&interfaceNames, "interfaces", "", "names of the network interfaces to monitor (comma separated)")
+	flag.IntVar(&prometheusPort, "port", 9338, "port to export metrics")
+	flag.StringVar(&logLevel, "log-level", "info", "log level (debug, info, warn, error, fatal, panic)")
+	flag.Parse()
+	return interfaceNames
+}
 
-	// Open device
-	handle, err = pcap.OpenLive(device, snapshotLen, promiscuous, timeout)
+func initLogger() {
+	if lvl, err := logrus.ParseLevel(logLevel); err == nil {
+		log.SetLevel(lvl)
+	} else {
+		log.SetLevel(logrus.InfoLevel)
+		log.Trace("Invalid log level specified (", logLevel, "), defaulting to info")
+	}
+}
+
+func newMetrics(reg prometheus.Registerer) *metrics {
+	m := &metrics{
+		networkTraffic: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "network_bytes_total",
+			Help: "Number of bytes seen on the network.",
+		}, []string{"interfaceName", "srcMAC", "dstMAC", "srcIP", "dstIP", "protocol"}),
+	}
+	reg.MustRegister(m.networkTraffic)
+	return m
+}
+
+func (m *metrics) updateMetrics(summary *packetSummary) {
+	m.networkTraffic.WithLabelValues(summary.interfaceName, summary.sourceMAC, summary.destinationMAC, summary.sourceIP, summary.destinationIP, summary.protocol).Add(float64(summary.length))
+}
+
+func newPacketDecoder() *packetDecoder {
+	var ethernetLayer layers.Ethernet
+	var ip4Layer layers.IPv4
+	var ip6Layer layers.IPv6
+	var tcpLayer layers.TCP
+	var udpLayer layers.UDP
+	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerArray(nil))
+	dlc.Put(&ethernetLayer)
+	dlc.Put(&ip4Layer)
+	dlc.Put(&ip6Layer)
+	dlc.Put(&tcpLayer)
+	dlc.Put(&udpLayer)
+
+	decoder := dlc.LayersDecoder(layers.LayerTypeEthernet, gopacket.NilDecodeFeedback)
+	decoded := make([]gopacket.LayerType, 0, 20)
+
+	return &packetDecoder{
+		ethernetLayer:          ethernetLayer,
+		ip4Layer:               ip4Layer,
+		ip6Layer:               ip6Layer,
+		tcpLayer:               tcpLayer,
+		udpLayer:               udpLayer,
+		decodingLayerContainer: dlc,
+		decoder:                decoder,
+		decoded:                decoded,
+	}
+}
+
+func (p *packetDecoder) decode(handle *pcap.Handle, interfaceName string) (*packetSummary, error) {
+	if packetData, _, err := handle.ZeroCopyReadPacketData(); err != nil {
+		if err == io.EOF {
+			return nil, err
+		}
+		log.Fatal(err)
+
+	} else {
+		var srcMAC, destMac net.HardwareAddr
+		var srcIP, destIP net.IP
+		var protocol = "unknown"
+		var packetLength int
+
+		if lt, err := p.decoder(packetData, &p.decoded); err != nil {
+			log.Debug("Error decoding packet: %s", err)
+			return nil, err
+		} else if lt != gopacket.LayerTypeZero {
+			log.Debug("Unknown layer type: %v", lt)
+			return nil, err
+		}
+
+		packetLength = len(packetData)
+
+		for _, layerType := range p.decoded {
+			switch layerType {
+			case layers.LayerTypeEthernet:
+				srcMAC = p.ethernetLayer.SrcMAC
+				destMac = p.ethernetLayer.DstMAC
+			case layers.LayerTypeIPv4:
+				srcIP = p.ip4Layer.SrcIP
+				destIP = p.ip4Layer.DstIP
+			case layers.LayerTypeIPv6:
+				if srcIP == nil && destIP == nil {
+					srcIP = p.ip6Layer.SrcIP
+					destIP = p.ip6Layer.DstIP
+				}
+			case layers.LayerTypeTCP:
+				protocol = "tcp"
+			case layers.LayerTypeUDP:
+				protocol = "udp"
+			default:
+				continue
+			}
+		}
+
+		log.Trace("srcMAC: %v, destMac: %v, srcIP: %v, destIP: %v, protocol: %s, packetLength: %d", srcMAC, destMac, srcIP, destIP, protocol, packetLength)
+
+		return &packetSummary{
+			interfaceName:  interfaceName,
+			sourceMAC:      srcMAC.String(),
+			destinationMAC: destMac.String(),
+			sourceIP:       srcIP.String(),
+			destinationIP:  destIP.String(),
+			protocol:       protocol,
+			length:         packetLength,
+		}, nil
+	}
+	return nil, nil
+}
+
+func scanInterface(interfaceName string, metrics *metrics) error {
+	log.Infof("Scanning interface %s", interfaceName)
+	handle, err := pcap.OpenLive(interfaceName, 65536, true, pcap.BlockForever)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer handle.Close()
 
-	gocleanup.Register(printStats)
+	stop := make(chan struct{})
+	go readPacket(handle, interfaceName, metrics, stop)
+	defer close(stop)
 
-	for x := 0; x < numhosts; x++ {
-		if x == 0 {
-			continue
-		}
-		addr := fmt.Sprintf("%s.%d", baseaddr, x)
-		names, err := net.LookupAddr(addr)
-		var hostname string
-		if err != nil || len(names) == 0 {
-			hostname = fmt.Sprintf("unknown-%s", addr)
-			if debug {
-				fmt.Printf("%s - %s\n", addr, hostname)
-			}
-		} else {
-			hostname = names[0]
-			if debug {
-				fmt.Printf("%s - %s\n", addr, hostname)
-			}
-		}
-
-		nodes = append(nodes,
-			node{IP: net.ParseIP(addr),
-				addr:     addr,
-				hostname: hostname,
-				incount:  0,
-				outcount: 0,
-			})
-	}
-
-	if debug2 {
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Press any key to continue...")
-		text, _ := reader.ReadString('\n')
-		fmt.Println(text)
-	}
-
-	ticker := time.NewTicker(time.Minute)
-	go func() {
-		for t := range ticker.C {
-			logStats()
-			clearStats()
-			_ = t
-			if debug {
-				printStats()
-			}
-
-		}
-	}()
-
-	go func() {
-		http.Handle("/metrics", promhttp.Handler())
-		url := fmt.Sprintf(":%s", port)
-		log.Fatal(http.ListenAndServe(url, nil))
-	}()
-
-	daemon.SdNotify(false, "READY=1")
-
-	ticker2 := time.NewTicker(time.Second * 15)
-	go func() {
-		for t := range ticker2.C {
-			_ = t
-			url := fmt.Sprintf("http://localhost:%s/metrics", port)
-			_, err := http.Get(url)
-			if err != nil {
-				log.Println("internal health check failed")
-			} else {
-				daemon.SdNotify(false, "WATCHDOG=1")
-			}
-		}
-	}()
-
-	packetSource := gopacket.NewPacketSource(handle, handle.LinkType())
-	for packet := range packetSource.Packets() {
-		//printPacketInfo(packet)
-		analyzePacket(packet)
-	}
-
+	return nil
 }
 
-func analyzePacket(packet gopacket.Packet) {
-
-	ipLayer := packet.Layer(layers.LayerTypeIPv4)
-	if ipLayer != nil {
-		ip, _ := ipLayer.(*layers.IPv4)
-		netBytes.Add(float64(ip.Length))
-		for i, node := range nodes {
-			if node.addr != "" {
-				if node.IP.Equal(ip.SrcIP) {
-					nodeBytes.With(prometheus.Labels{"device": node.hostname}).Add(float64(ip.Length))
-					nodes[i].outcount += uint64(ip.Length)
-					if debug {
-						fmt.Printf("From %s to %s - len %d\n", node.hostname, ip.DstIP, ip.Length)
-					}
-				}
-				if node.IP.Equal(ip.DstIP) {
-					nodeBytes.With(prometheus.Labels{"device": node.hostname}).Add(float64(ip.Length))
-					nodes[i].incount += uint64(ip.Length)
-					if debug {
-						fmt.Printf("From %s to %s - len %d\n", ip.SrcIP, node.hostname, ip.Length)
-					}
-				}
+func readPacket(handle *pcap.Handle, interfaceName string, metrics *metrics, stop chan struct{}) {
+	decoder := newPacketDecoder()
+	for {
+		select {
+		case <-stop:
+			log.Infof("Stopping interface %s", interfaceName)
+			return
+		default:
+			if summary, err := decoder.decode(handle, interfaceName); err != nil {
+				continue
+			} else if summary != nil {
+				metrics.updateMetrics(summary)
 			}
-
 		}
 	}
 }
 
-func printStats() {
-	log.Printf("------------------- Summary Stats ------------------- \n")
-	for _, node := range nodes {
-		if node.incount != 0 && node.outcount != 0 {
-			log.Printf("%-16s   %-30s    %-10.1fk    %-10.1fk\n",
-				node.addr,
-				node.hostname,
-				float64(node.incount)/1000,
-				float64(node.outcount)/1000)
-		}
-	}
-	f.Sync()
-}
+func getDefaultInterfaces() ([]string, error) {
 
-func logStats() {
-	log.Printf("------------------- Summary Stats ------------------- \n")
-	for _, node := range nodes {
-		if node.incount != 0 && node.outcount != 0 {
-			log.Printf("%-16s   %-30s    %-10.1fk    %-10.1fk\n",
-				node.addr,
-				node.hostname,
-				float64(node.incount)/1000,
-				float64(node.outcount)/1000)
-		}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		log.Fatal(err)
+		return nil, err
 	}
-	f.Sync()
-}
 
-func clearStats() {
-	for i, _ := range nodes {
-		nodes[i].incount = 0
-		nodes[i].outcount = 0
+	var defaultInterfaces []string
+	for _, i := range interfaces {
+		if i.Flags&net.FlagUp == 0 {
+			continue // interface down
+		}
+		if i.Flags&net.FlagLoopback != 0 {
+			continue // loopback interface
+		}
+		if i.Flags&net.FlagPointToPoint != 0 {
+			continue // point-to-point interface
+		}
+		addrs, err := i.Addrs()
+		if err != nil {
+			log.Fatal(err)
+			return nil, err
+		}
+		if len(addrs) == 0 {
+			continue // interface has no addresses
+		}
+		defaultInterfaces = append(defaultInterfaces, i.Name)
 	}
+
+	return defaultInterfaces, nil
 }
