@@ -245,6 +245,9 @@ func scanInterface(interfaceName string, metrics *metrics) error {
 		stop := make(chan struct{})
 		go readPacket(handle, interfaceName, metrics, stop)
 		defer close(stop)
+		for {
+		}
+
 	}
 	return nil
 }
@@ -254,10 +257,10 @@ func readPacket(handle *pcapgo.EthernetHandle, interfaceName string, metrics *me
 	for {
 		select {
 		case <-stop:
-			log.Infof("Stopping interface %s", interfaceName)
+			log.Info("Stopping interface ", interfaceName)
 			return
 		default:
-			log.Debug("Reading packet from interface %s", interfaceName)
+			log.Debug("Reading packet from interface ", interfaceName)
 			if summary, err := decoder.decode(handle, interfaceName); err != nil {
 				continue
 			} else if summary != nil {
@@ -278,15 +281,15 @@ func getDefaultInterfaces() ([]string, error) {
 	var defaultInterfaces []string
 	for _, i := range interfaces {
 		if i.Flags&net.FlagUp == 0 {
-			log.Debug("Interface %s is down, ignoring", i.Name)
+			log.Debug("Interface ", i.Name, " is down, ignoring")
 			continue // interface down
 		}
 		if i.Flags&net.FlagLoopback != 0 {
-			log.Debug("Interface %s is loopback, ignoring", i.Name)
+			log.Debug("Interface ", i.Name, " is loopback, ignoring")
 			continue // loopback interface
 		}
 		if i.Flags&net.FlagPointToPoint != 0 {
-			log.Debug("Interface %s is point-to-point, ignoring", i.Name)
+			log.Debug("Interface ", i.Name, " is point-to-point, ignoring")
 			continue // point-to-point interface
 		}
 		addrs, err := i.Addrs()
@@ -295,10 +298,10 @@ func getDefaultInterfaces() ([]string, error) {
 			return nil, err
 		}
 		if len(addrs) == 0 {
-			log.Debug("Interface %s has no addresses, ignoring", i.Name)
+			log.Debug("Interface ", i.Name, " has no addresses, ignoring")
 			continue // interface has no addresses
 		}
-		log.Debug("Interface %s is a valid interface", i.Name)
+		log.Debug("Interface ", i.Name, " is a valid interface")
 		defaultInterfaces = append(defaultInterfaces, i.Name)
 	}
 
