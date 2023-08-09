@@ -75,8 +75,41 @@ type packetSummary struct {
 	length         int
 }
 
+func newPacketSummary(interfaceName string,
+	sourceMAC,
+	destinationMAC net.HardwareAddr,
+	sourceIPv4,
+	destinationIPv4,
+	sourceIPv6,
+	destinationIPv6 net.IP,
+	protocol string,
+	length int) *packetSummary {
+
+	if sourceIPv4 != nil || destinationIPv4 != nil {
+		return &packetSummary{
+			interfaceName:  interfaceName,
+			sourceMAC:      sourceMAC.String(),
+			destinationMAC: destinationMAC.String(),
+			sourceIP:       sourceIPv4.String(),
+			destinationIP:  destinationIPv4.String(),
+			protocol:       protocol,
+			length:         length,
+		}
+	}
+	return &packetSummary{
+		interfaceName:  interfaceName,
+		sourceMAC:      sourceMAC.String(),
+		destinationMAC: destinationMAC.String(),
+		sourceIP:       sourceIPv6.String(),
+		destinationIP:  destinationIPv6.String(),
+		protocol:       protocol,
+		length:         length,
+	}
+}
+
 // packetDecoder is a struct to hold the packet decoder
 type packetDecoder struct {
+	interfaceName          string
 	ethernetLayer          layers.Ethernet
 	ip4Layer               layers.IPv4
 	ip6Layer               layers.IPv6
@@ -87,7 +120,7 @@ type packetDecoder struct {
 	decoded                []gopacket.LayerType
 }
 
-func newPacketDecoder() *packetDecoder {
+func newPacketDecoder(interfaceName string) *packetDecoder {
 	log.Trace("Creating new packet decoder")
 
 	var ethernetLayer layers.Ethernet
@@ -108,6 +141,7 @@ func newPacketDecoder() *packetDecoder {
 	decoded := make([]gopacket.LayerType, 0, 20)
 
 	return &packetDecoder{
+		interfaceName:          interfaceName,
 		ethernetLayer:          ethernetLayer,
 		ip4Layer:               ip4Layer,
 		ip6Layer:               ip6Layer,
@@ -119,8 +153,7 @@ func newPacketDecoder() *packetDecoder {
 	}
 }
 
-func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle,
-	interfaceName string) (*packetSummary, error) {
+func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, error) {
 	log.Trace("Decoding packet")
 
 	if packetData, _, err := handle.ZeroCopyReadPacketData(); err != nil {
@@ -130,15 +163,13 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle,
 		log.Fatal(err)
 	} else {
 		var srcMAC, destMac net.HardwareAddr
-		var srcIP, destIP net.IP
+		var srcIPv4, destIPv4 net.IP
+		var srcIPv6, destIPv6 net.IP
 		var protocol = "unknown"
 		var packetLength int
 
-		if lt, err := p.decoder(packetData, &p.decoded); err != nil {
+		if _, err := p.decoder(packetData, &p.decoded); err != nil {
 			log.Debug("Error decoding packet: ", err)
-			return nil, err
-		} else if lt != gopacket.LayerTypeZero {
-			log.Debug("Unknown layer type: ", lt)
 			return nil, err
 		}
 
@@ -150,13 +181,11 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle,
 				srcMAC = p.ethernetLayer.SrcMAC
 				destMac = p.ethernetLayer.DstMAC
 			case layers.LayerTypeIPv4:
-				srcIP = p.ip4Layer.SrcIP
-				destIP = p.ip4Layer.DstIP
+				srcIPv4 = p.ip4Layer.SrcIP
+				destIPv4 = p.ip4Layer.DstIP
 			case layers.LayerTypeIPv6:
-				if srcIP == nil && destIP == nil {
-					srcIP = p.ip6Layer.SrcIP
-					destIP = p.ip6Layer.DstIP
-				}
+				srcIPv6 = p.ip6Layer.SrcIP
+				destIPv6 = p.ip6Layer.DstIP
 			case layers.LayerTypeTCP:
 				protocol = "tcp"
 			case layers.LayerTypeUDP:
@@ -166,15 +195,20 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle,
 			}
 		}
 
-		return &packetSummary{
-			interfaceName:  interfaceName,
-			sourceMAC:      srcMAC.String(),
-			destinationMAC: destMac.String(),
-			sourceIP:       srcIP.String(),
-			destinationIP:  destIP.String(),
-			protocol:       protocol,
-			length:         packetLength,
-		}, nil
+		summary := newPacketSummary(
+			p.interfaceName,
+			srcMAC,
+			destMac,
+			srcIPv4,
+			destIPv4,
+			srcIPv6,
+			destIPv6,
+			protocol,
+			packetLength)
+
+		log.Trace("Packet: ", summary)
+
+		return summary, nil
 	}
 	return nil, nil
 }
@@ -276,37 +310,25 @@ func initLogger() {
 }
 
 func scanInterface(interfaceName string, metrics *metrics) error {
-	log.Info("Scanning interface %s", interfaceName)
+	log.Info("Starting interface ", interfaceName, " packet capture")
 	if handle, err := pcapgo.NewEthernetHandle(interfaceName); err != nil {
 		log.Fatal(err)
 	} else {
 		defer handle.Close()
-		stop := make(chan struct{})
-		go readPacket(handle, interfaceName, metrics, stop)
-		defer close(stop)
-		for {
-		}
-
+		readPackets(handle, interfaceName, metrics)
 	}
 	return nil
 }
 
-func readPacket(handle *pcapgo.EthernetHandle,
-	interfaceName string, metrics *metrics,
-	stop chan struct{}) {
-	decoder := newPacketDecoder()
+func readPackets(handle *pcapgo.EthernetHandle,
+	interfaceName string, metrics *metrics) {
+	decoder := newPacketDecoder(interfaceName)
 	for {
-		select {
-		case <-stop:
-			log.Info("Stopping interface ", interfaceName)
-			return
-		default:
-			log.Debug("Reading packet from interface ", interfaceName)
-			if summary, err := decoder.decode(handle, interfaceName); err != nil {
-				continue
-			} else if summary != nil {
-				metrics.updateMetrics(summary)
-			}
+		log.Debug("Reading packet from interface ", interfaceName)
+		if summary, err := decoder.decode(handle); err != nil {
+			continue
+		} else if summary != nil {
+			metrics.updateMetrics(summary)
 		}
 	}
 }
