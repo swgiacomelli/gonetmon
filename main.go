@@ -118,9 +118,9 @@ func setMonitoredInterfaces() {
 
 func parseFlags() {
 	// get the command line params
-	flag.StringArrayVar(&interfaceNames, "interfaces", nil, "names of the network interfaces to monitor")
-	flag.IntVar(&prometheusPort, "port", 9338, "port to export metrics")
-	flag.StringVar(&logLevel, "log-level", "info", "log level (debug, info, warn, error, fatal, panic)")
+	flag.StringArrayVarP(&interfaceNames, "interfaces", "i", nil, "names of the network interfaces to monitor")
+	flag.IntVarP(&prometheusPort, "port", "p", 9338, "port to export metrics")
+	flag.StringVarP(&logLevel, "log-level", "l", "info", "log level (debug, info, warn, error, fatal, panic)")
 	flag.Parse()
 }
 
