@@ -220,39 +220,42 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 }
 
 func (p *packetDecoder) ethernetLayer() *layers.Ethernet {
-	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
-		log.Trace("Ethernet layer found")
-		return m[layers.LayerTypeEthernet].(*layers.Ethernet)
+	if d, ok := p.dlc.Decoder(layers.LayerTypeEthernet); ok {
+		return d.(*layers.Ethernet)
 	}
-	log.Trace("Ethernet layer not found")
+	log.Fatal("Ethernet layer not found")
 	return nil
 }
 
 func (p *packetDecoder) ipv4Layer() *layers.IPv4 {
-	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
-		return m[layers.LayerTypeIPv4].(*layers.IPv4)
+	if d, ok := p.dlc.Decoder(layers.LayerTypeIPv4); ok {
+		return d.(*layers.IPv4)
 	}
+	log.Fatal("IPv4 layer not found")
 	return nil
 }
 
 func (p *packetDecoder) ipv6Layer() *layers.IPv6 {
-	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
-		return m[layers.LayerTypeIPv6].(*layers.IPv6)
+	if d, ok := p.dlc.Decoder(layers.LayerTypeIPv6); ok {
+		return d.(*layers.IPv6)
 	}
+	log.Fatal("IPv6 layer not found")
 	return nil
 }
 
 func (p *packetDecoder) dnsLayer() *layers.DNS {
-	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
-		return m[layers.LayerTypeDNS].(*layers.DNS)
+	if d, ok := p.dlc.Decoder(layers.LayerTypeDNS); ok {
+		return d.(*layers.DNS)
 	}
+	log.Fatal("DNS layer not found")
 	return nil
 }
 
 func (p *packetDecoder) payloadLayer() *gopacket.Payload {
-	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
-		return m[gopacket.LayerTypePayload].(*gopacket.Payload)
+	if d, ok := p.dlc.Decoder(gopacket.LayerTypePayload); ok {
+		return d.(*gopacket.Payload)
 	}
+	log.Fatal("Payload layer not found")
 	return nil
 }
 
