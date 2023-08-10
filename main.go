@@ -122,12 +122,13 @@ func newPacketSummary(interfaceName string,
 // packetDecoder is a struct to hold the packet decoder
 type packetDecoder struct {
 	interfaceName string
-	ethernetLayer layers.Ethernet
-	ip4Layer      layers.IPv4
-	ip6Layer      layers.IPv6
-	tcpLayer      layers.TCP
-	udpLayer      layers.UDP
-	dlc           gopacket.DecodingLayerContainer
+	ethernetLayer *layers.Ethernet
+	ip4Layer      *layers.IPv4
+	ip6Layer      *layers.IPv6
+	tcpLayer      *layers.TCP
+	udpLayer      *layers.UDP
+	payloadLayer  *gopacket.Payload
+	dlc           *gopacket.DecodingLayerContainer
 	decoder       gopacket.DecodingLayerFunc
 	decoded       []gopacket.LayerType
 }
@@ -156,12 +157,13 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 
 	return &packetDecoder{
 		interfaceName: interfaceName,
-		ethernetLayer: ethernetLayer,
-		ip4Layer:      ip4Layer,
-		ip6Layer:      ip6Layer,
-		tcpLayer:      tcpLayer,
-		udpLayer:      udpLayer,
-		dlc:           dlc,
+		ethernetLayer: &ethernetLayer,
+		ip4Layer:      &ip4Layer,
+		ip6Layer:      &ip6Layer,
+		tcpLayer:      &tcpLayer,
+		udpLayer:      &udpLayer,
+		payloadLayer:  &payloadLayer,
+		dlc:           &dlc,
 		decoder:       decoder,
 		decoded:       decoded,
 	}
