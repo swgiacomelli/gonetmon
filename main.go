@@ -452,6 +452,8 @@ func getDefaultInterfaces() ([]string, error) {
 		return nil, err
 	}
 
+	log.Trace("Interfaces: ", interfaces)
+
 	var defaultInterfaces []string
 	for _, i := range interfaces {
 		if i.Flags&net.FlagUp == 0 {
