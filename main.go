@@ -142,7 +142,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	var udpLayer layers.UDP
 	var payloadLayer gopacket.Payload
 
-	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerArray(nil))
+	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerMap{})
 
 	dlc = dlc.Put(&ethernetLayer)
 	dlc = dlc.Put(&ip4Layer)
@@ -190,19 +190,6 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 		}
 
 		packetLength = len(packetData)
-
-		log.Trace("Decoded layer types: ", p.decoded)
-
-		for _, layerType := range p.decoded {
-			if d, ok := p.dlc.Decoder(layerType); !ok {
-				log.Trace("No decoder for layer type: ", layerType)
-				continue
-			} else {
-				log.Trace("Decoding layer type: ", layerType)
-				x := d.CanDecode()
-				log.Trace("Can decode: ", x)
-			}
-		}
 
 		for _, layerType := range p.decoded {
 			log.Trace("Layer type: ", layerType)
