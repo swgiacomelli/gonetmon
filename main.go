@@ -279,8 +279,8 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 		ipVersion = 0
 
 		packetLength = len(packetData)
-		log.Trace(p.decoder)
 		for _, layerType := range p.decoded {
+			log.Trace("Layer type: ", layerType)
 			switch layerType {
 			case layers.LayerTypeEthernet:
 				srcMAC = p.ethernetLayer().SrcMAC
