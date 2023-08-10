@@ -191,6 +191,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	dlc = dlc.Put(&tcpLayer)
 	dlc = dlc.Put(&udpLayer)
 	dlc = dlc.Put(&dnsLayer)
+	dlc = dlc.Put(&tlsLayer)
 	dlc = dlc.Put(&payloadLayer)
 
 	decoder := dlc.LayersDecoder(layers.LayerTypeEthernet, gopacket.NilDecodeFeedback)
@@ -278,7 +279,7 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 		ipVersion = 0
 
 		packetLength = len(packetData)
-
+		log.Trace(p.decoder)
 		for _, layerType := range p.decoded {
 			switch layerType {
 			case layers.LayerTypeEthernet:
