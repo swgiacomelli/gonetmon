@@ -309,8 +309,6 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 				for _, dnsRequest := range dnsRequests {
 					log.Trace("DNS Request: ", dnsRequest)
 				}
-			default:
-				continue
 			}
 
 			summary := newPacketSummary(
