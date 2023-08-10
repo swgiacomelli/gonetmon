@@ -30,6 +30,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+var (
+	log                 = logrus.New() // logger
+	interfaceNames      []string       // interfaces to monitor
+	logLevel            = "info"       // default log level
+	prometheusPort      = 9338         // default port to export metrics
+	monitoredInterfaces []string       // interfaces to monitor
+)
+
 //***********************************************************************
 // Metrics
 //***********************************************************************
@@ -37,6 +45,7 @@ import (
 // metrics is a struct to hold all the prometheus metrics
 type metrics struct {
 	networkTraffic *prometheus.CounterVec // counter for total network traffic
+	dnsRequests    *prometheus.CounterVec // counter for DNS requests
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -44,20 +53,22 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 		networkTraffic: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "network_bytes_total",
 			Help: "Number of bytes seen on the network.",
-		}, []string{"interfaceName", "srcMAC", "dstMAC", "srcIP", "dstIP", "protocol"}),
+		}, []string{"interfaceName", "srcMAC", "dstMAC", "srcIP", "dstIP"}),
+
+		dnsRequests: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "dns_requests_total",
+			Help: "Number of DNS requests seen on the network."},
+			[]string{"interfaceName", "srcIP", "dnsName"}),
 	}
+
 	reg.MustRegister(m.networkTraffic)
+	reg.MustRegister(m.dnsRequests)
+
 	return m
 }
 
-func (m *metrics) updateMetrics(summary *packetSummary) {
-	m.networkTraffic.WithLabelValues(
-		summary.interfaceName,
-		summary.sourceMAC,
-		summary.destinationMAC,
-		summary.sourceIP,
-		summary.destinationIP,
-		summary.protocol).Add(float64(summary.length))
+type networkMetric interface {
+	updateMetric(metrics *metrics) error
 }
 
 //***********************************************************************
@@ -71,8 +82,17 @@ type packetSummary struct {
 	destinationMAC string
 	sourceIP       string
 	destinationIP  string
-	protocol       string
 	length         int
+}
+
+func (p *packetSummary) updateMetric(metrics *metrics) error {
+	metrics.networkTraffic.WithLabelValues(
+		p.interfaceName,
+		p.sourceMAC,
+		p.destinationMAC,
+		p.sourceIP,
+		p.destinationIP).Add(float64(p.length))
+	return nil
 }
 
 func (p *packetSummary) String() string {
@@ -82,7 +102,6 @@ func (p *packetSummary) String() string {
 		p.destinationMAC,
 		p.sourceIP,
 		p.destinationIP,
-		p.protocol,
 		strconv.Itoa(p.length),
 	}, ",")
 }
@@ -94,7 +113,6 @@ func newPacketSummary(interfaceName string,
 	destinationIPv4,
 	sourceIPv6,
 	destinationIPv6 net.IP,
-	protocol string,
 	length int) *packetSummary {
 
 	if sourceIPv4 != nil || destinationIPv4 != nil {
@@ -104,7 +122,6 @@ func newPacketSummary(interfaceName string,
 			destinationMAC: destinationMAC.String(),
 			sourceIP:       sourceIPv4.String(),
 			destinationIP:  destinationIPv4.String(),
-			protocol:       protocol,
 			length:         length,
 		}
 	}
@@ -114,21 +131,55 @@ func newPacketSummary(interfaceName string,
 		destinationMAC: destinationMAC.String(),
 		sourceIP:       sourceIPv6.String(),
 		destinationIP:  destinationIPv6.String(),
-		protocol:       protocol,
 		length:         length,
 	}
+}
+
+type dnsRequest struct {
+	interfaceName string
+	sourceIP      string
+	dnsName       string
+}
+
+func newDNSRequests(interfaceName string, sourceIPv4, sourceIpv6 net.IP, dnsLayer *layers.DNS) []networkMetric {
+	if dnsLayer == nil || dnsLayer.QR {
+		return nil
+	}
+
+	var srcIP string
+
+	if sourceIPv4 != nil {
+		srcIP = sourceIPv4.String()
+	} else if sourceIpv6 != nil {
+		srcIP = sourceIpv6.String()
+	} else {
+		srcIP = "unknown"
+	}
+
+	dnsRequests := make([]networkMetric, 0, len(dnsLayer.Questions))
+	for _, question := range dnsLayer.Questions {
+		dnsRequests = append(dnsRequests, &dnsRequest{
+			interfaceName: interfaceName,
+			sourceIP:      srcIP,
+			dnsName:       string(question.Name),
+		})
+	}
+
+	return dnsRequests
+}
+
+func (d *dnsRequest) updateMetric(metrics *metrics) error {
+	metrics.dnsRequests.WithLabelValues(
+		d.interfaceName,
+		d.sourceIP,
+		d.dnsName).Inc()
+	return nil
 }
 
 // packetDecoder is a struct to hold the packet decoder
 type packetDecoder struct {
 	interfaceName string
-	ethernetLayer *layers.Ethernet
-	ip4Layer      *layers.IPv4
-	ip6Layer      *layers.IPv6
-	tcpLayer      *layers.TCP
-	udpLayer      *layers.UDP
-	payloadLayer  *gopacket.Payload
-	dlc           *gopacket.DecodingLayerContainer
+	dlc           gopacket.DecodingLayerContainer
 	decoder       gopacket.DecodingLayerFunc
 	decoded       []gopacket.LayerType
 }
@@ -136,42 +187,60 @@ type packetDecoder struct {
 func newPacketDecoder(interfaceName string) *packetDecoder {
 	log.Trace("Creating new packet decoder")
 
-	var ethernetLayer layers.Ethernet
-	var ip4Layer layers.IPv4
-	var ip6Layer layers.IPv6
-	var tcpLayer layers.TCP
-	var udpLayer layers.UDP
-	var payloadLayer gopacket.Payload
-
 	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerMap{})
-
-	dlc = dlc.Put(&ethernetLayer)
-	dlc = dlc.Put(&ip4Layer)
-	dlc = dlc.Put(&ip6Layer)
-	dlc = dlc.Put(&tcpLayer)
-	dlc = dlc.Put(&udpLayer)
-	dlc = dlc.Put(&payloadLayer)
+	dlc = dlc.Put(new(layers.Ethernet))
+	dlc = dlc.Put(new(layers.IPv4))
+	dlc = dlc.Put(new(layers.IPv6))
+	dlc = dlc.Put(new(layers.DNS))
+	dlc = dlc.Put(new(gopacket.Payload))
 
 	decoder := dlc.LayersDecoder(layers.LayerTypeEthernet, gopacket.NilDecodeFeedback)
 	decoded := make([]gopacket.LayerType, 0, 20)
 
 	return &packetDecoder{
 		interfaceName: interfaceName,
-		ethernetLayer: &ethernetLayer,
-		ip4Layer:      &ip4Layer,
-		ip6Layer:      &ip6Layer,
-		tcpLayer:      &tcpLayer,
-		udpLayer:      &udpLayer,
-		payloadLayer:  &payloadLayer,
-		dlc:           &dlc,
+		dlc:           dlc,
 		decoder:       decoder,
 		decoded:       decoded,
 	}
 }
 
-func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, error) {
-	log.Trace("Decoding packet")
+func (p *packetDecoder) ethernetLayer() *layers.Ethernet {
+	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
+		return m[layers.LayerTypeEthernet].(*layers.Ethernet)
+	}
+	return nil
+}
 
+func (p *packetDecoder) ipv4Layer() *layers.IPv4 {
+	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
+		return m[layers.LayerTypeIPv4].(*layers.IPv4)
+	}
+	return nil
+}
+
+func (p *packetDecoder) ipv6Layer() *layers.IPv6 {
+	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
+		return m[layers.LayerTypeIPv6].(*layers.IPv6)
+	}
+	return nil
+}
+
+func (p *packetDecoder) dnsLayer() *layers.DNS {
+	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
+		return m[layers.LayerTypeDNS].(*layers.DNS)
+	}
+	return nil
+}
+
+func (p *packetDecoder) payloadLayer() *gopacket.Payload {
+	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
+		return m[gopacket.LayerTypePayload].(*gopacket.Payload)
+	}
+	return nil
+}
+
+func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkMetric, error) {
 	if packetData, _, err := handle.ReadPacketData(); err != nil {
 		if err == io.EOF {
 			return nil, err
@@ -181,8 +250,9 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 		var srcMAC, destMac net.HardwareAddr
 		var srcIPv4, destIPv4 net.IP
 		var srcIPv6, destIPv6 net.IP
-		var protocol = "unknown"
 		var packetLength int
+
+		var metrics []networkMetric
 
 		if lt, err := p.decoder(packetData, &p.decoded); err != nil {
 			log.Debug("Error decoding packet: ", err)
@@ -196,37 +266,38 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 		for _, layerType := range p.decoded {
 			switch layerType {
 			case layers.LayerTypeEthernet:
-				srcMAC = p.ethernetLayer.SrcMAC
-				destMac = p.ethernetLayer.DstMAC
+				srcMAC = p.ethernetLayer().SrcMAC
+				destMac = p.ethernetLayer().DstMAC
 			case layers.LayerTypeIPv4:
-				srcIPv4 = p.ip4Layer.SrcIP
-				destIPv4 = p.ip4Layer.DstIP
+				srcIPv4 = p.ipv4Layer().SrcIP
+				destIPv4 = p.ipv4Layer().DstIP
 			case layers.LayerTypeIPv6:
-				srcIPv6 = p.ip6Layer.SrcIP
-				destIPv6 = p.ip6Layer.DstIP
-			case layers.LayerTypeTCP:
-				protocol = "tcp"
-			case layers.LayerTypeUDP:
-				protocol = "udp"
+				srcIPv6 = p.ipv6Layer().SrcIP
+				destIPv6 = p.ipv6Layer().DstIP
+			case layers.LayerTypeDNS:
+				dnsRequests := newDNSRequests(p.interfaceName, srcIPv4, srcIPv6, p.dnsLayer())
+				if dnsRequests != nil {
+					metrics = append(metrics, dnsRequests...)
+				}
 			default:
 				continue
 			}
+
+			summary := newPacketSummary(
+				p.interfaceName,
+				srcMAC,
+				destMac,
+				srcIPv4,
+				destIPv4,
+				srcIPv6,
+				destIPv6,
+				packetLength)
+
+			log.Trace("Packet: ", summary)
+			metrics = append(metrics, summary)
+
+			return metrics, nil
 		}
-
-		summary := newPacketSummary(
-			p.interfaceName,
-			srcMAC,
-			destMac,
-			srcIPv4,
-			destIPv4,
-			srcIPv6,
-			destIPv6,
-			protocol,
-			packetLength)
-
-		log.Trace("Packet: ", summary)
-
-		return summary, nil
 	}
 	return nil, nil
 }
@@ -234,14 +305,6 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 //***********************************************************************
 // Main
 //***********************************************************************
-
-var (
-	log                 = logrus.New() // logger
-	interfaceNames      []string       // interfaces to monitor
-	logLevel            = "info"       // default log level
-	prometheusPort      = 9338         // default port to export metrics
-	monitoredInterfaces []string       // interfaces to monitor
-)
 
 func init() {
 	parseFlags()             // parse command line flags
@@ -342,11 +405,15 @@ func readPackets(handle *pcapgo.EthernetHandle,
 	interfaceName string, metrics *metrics) {
 	decoder := newPacketDecoder(interfaceName)
 	for {
-		log.Trace("Reading packet from interface ", interfaceName)
-		if summary, err := decoder.decode(handle); err != nil {
+		if networkMetrics, err := decoder.decodeMetrics(handle); err != nil {
 			continue
-		} else if summary != nil {
-			metrics.updateMetrics(summary)
+		} else if networkMetrics != nil {
+			for _, m := range networkMetrics {
+				err := m.updateMetric(metrics)
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
 		}
 	}
 }
