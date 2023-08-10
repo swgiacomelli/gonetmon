@@ -168,6 +168,14 @@ func newDNSRequests(interfaceName string, sourceIPv4, sourceIpv6 net.IP, dnsLaye
 	return dnsRequests
 }
 
+func (d *dnsRequest) String() string {
+	return strings.Join([]string{
+		d.interfaceName,
+		d.sourceIP,
+		d.dnsName,
+	}, ",")
+}
+
 func (d *dnsRequest) updateMetric(metrics *metrics) error {
 	metrics.dnsRequests.WithLabelValues(
 		d.interfaceName,
@@ -277,7 +285,7 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 			log.Debug("Error decoding packet: ", err)
 			return nil, err
 		} else if lt != gopacket.LayerTypeZero {
-			log.Warn("Unsupported layer type: ", lt)
+			log.Debug("Unsupported layer type: ", lt)
 		}
 
 		packetLength = len(packetData)
@@ -297,6 +305,9 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 				dnsRequests := newDNSRequests(p.interfaceName, srcIPv4, srcIPv6, p.dnsLayer())
 				if dnsRequests != nil {
 					metrics = append(metrics, dnsRequests...)
+				}
+				for _, dnsRequest := range dnsRequests {
+					log.Trace("DNS Request: ", dnsRequest)
 				}
 			default:
 				continue
