@@ -179,6 +179,7 @@ func (d *dnsRequest) updateMetric(metrics *metrics) error {
 // packetDecoder is a struct to hold the packet decoder
 type packetDecoder struct {
 	interfaceName string
+	layers        []interface{}
 	dlc           gopacket.DecodingLayerContainer
 	decoder       gopacket.DecodingLayerFunc
 	decoded       []gopacket.LayerType
@@ -187,21 +188,34 @@ type packetDecoder struct {
 func newPacketDecoder(interfaceName string) *packetDecoder {
 	log.Trace("Creating new packet decoder")
 
+	var ethernetLayer layers.Ethernet
+	var ipv4Layer layers.IPv4
+	var ipv6Layer layers.IPv6
+	var dnsLayer layers.DNS
+	var payloadLayer gopacket.Payload
+
 	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerMap{})
-	dlc = dlc.Put(new(layers.Ethernet))
-	dlc = dlc.Put(new(layers.IPv4))
-	dlc = dlc.Put(new(layers.IPv6))
-	dlc = dlc.Put(new(layers.DNS))
-	dlc = dlc.Put(new(gopacket.Payload))
+	dlc = dlc.Put(&ethernetLayer)
+	dlc = dlc.Put(&ipv4Layer)
+	dlc = dlc.Put(&ipv6Layer)
+	dlc = dlc.Put(&dnsLayer)
+	dlc = dlc.Put(&payloadLayer)
 
 	decoder := dlc.LayersDecoder(layers.LayerTypeEthernet, gopacket.NilDecodeFeedback)
 	decoded := make([]gopacket.LayerType, 0, 20)
 
 	return &packetDecoder{
 		interfaceName: interfaceName,
-		dlc:           dlc,
-		decoder:       decoder,
-		decoded:       decoded,
+		layers: []interface{}{
+			&ethernetLayer,
+			&ipv4Layer,
+			&ipv6Layer,
+			&dnsLayer,
+			&payloadLayer,
+		},
+		dlc:     dlc,
+		decoder: decoder,
+		decoded: decoded,
 	}
 }
 
