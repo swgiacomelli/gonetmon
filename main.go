@@ -194,26 +194,20 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 		packetLength = len(packetData)
 
 		for _, layerType := range p.decoded {
-			log.Trace("Layer type: ", layerType)
 			switch layerType {
 			case layers.LayerTypeEthernet:
 				srcMAC = p.ethernetLayer.SrcMAC
 				destMac = p.ethernetLayer.DstMAC
-				log.Trace("Ethernet: ", p.ethernetLayer.SrcMAC)
 			case layers.LayerTypeIPv4:
 				srcIPv4 = p.ip4Layer.SrcIP
 				destIPv4 = p.ip4Layer.DstIP
-				log.Trace("IPv4: ", p.ip4Layer)
 			case layers.LayerTypeIPv6:
 				srcIPv6 = p.ip6Layer.SrcIP
 				destIPv6 = p.ip6Layer.DstIP
-				log.Trace("IPv6: ", p.ip6Layer)
 			case layers.LayerTypeTCP:
 				protocol = "tcp"
-				log.Trace("TCP: ", p.tcpLayer)
 			case layers.LayerTypeUDP:
 				protocol = "udp"
-				log.Trace("UDP: ", p.udpLayer)
 			default:
 				continue
 			}
