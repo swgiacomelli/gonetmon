@@ -197,7 +197,7 @@ func (p *packetDecoder) decode(handle *pcapgo.EthernetHandle) (*packetSummary, e
 			case layers.LayerTypeEthernet:
 				srcMAC = p.ethernetLayer.SrcMAC
 				destMac = p.ethernetLayer.DstMAC
-				log.Trace("Ethernet: ", p.ethernetLayer)
+				log.Trace("Ethernet: ", p.ethernetLayer.SrcMAC)
 			case layers.LayerTypeIPv4:
 				srcIPv4 = p.ip4Layer.SrcIP
 				destIPv4 = p.ip4Layer.DstIP
