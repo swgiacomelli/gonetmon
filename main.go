@@ -281,26 +281,20 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 		packetLength = len(packetData)
 		log.Trace("Layers: ", len(p.decoded))
 		for _, layerType := range p.decoded {
-			log.Trace("Layer type: ", layerType)
 			switch layerType {
 			case layers.LayerTypeEthernet:
 				srcMAC = p.ethernetLayer().SrcMAC
 				destMac = p.ethernetLayer().DstMAC
 			case layers.LayerTypeIPv4:
 				ipVersion = 4
-				log.Trace(p.ipv4Layer().SrcIP)
-				log.Trace(p.ipv4Layer().DstIP)
 				srcIP = p.ipv4Layer().SrcIP
 				destIP = p.ipv4Layer().DstIP
 			case layers.LayerTypeIPv6:
-				log.Trace(p.ipv6Layer().SrcIP)
-				log.Trace(p.ipv6Layer().DstIP)
-				if ipVersion == 4 {
-					continue
+				if ipVersion != 4 {
+					ipVersion = 6
+					srcIP = p.ipv6Layer().SrcIP
+					destIP = p.ipv6Layer().DstIP
 				}
-				ipVersion = 6
-				srcIP = p.ipv6Layer().SrcIP
-				destIP = p.ipv6Layer().DstIP
 			case layers.LayerTypeDNS:
 				dnsRequests := newDNSRequests(p.interfaceName, srcIP, p.dnsLayer())
 				if dnsRequests != nil {
@@ -310,20 +304,20 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 					log.Trace("DNS Request: ", dnsRequest)
 				}
 			}
-
-			summary := newPacketSummary(
-				p.interfaceName,
-				srcMAC,
-				destMac,
-				srcIP,
-				destIP,
-				packetLength)
-
-			log.Trace("Packet: ", summary)
-			metrics = append(metrics, summary)
-
-			return metrics, nil
 		}
+
+		summary := newPacketSummary(
+			p.interfaceName,
+			srcMAC,
+			destMac,
+			srcIP,
+			destIP,
+			packetLength)
+
+		log.Trace("Packet: ", summary)
+		metrics = append(metrics, summary)
+
+		return metrics, nil
 	}
 	return nil, nil
 }
