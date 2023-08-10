@@ -273,16 +273,15 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 		var metrics []networkMetric
 
 		if lt, err := p.decoder(packetData, &p.decoded); err != nil {
-			log.Debug("Error decoding packet: ", err)
+			log.Trace("Error decoding packet: ", err)
 			return nil, err
 		} else if lt != gopacket.LayerTypeZero {
-			log.Debug("Unsupported layer type: ", lt)
+			log.Trace("Unsupported layer type: ", lt)
 		}
 
 		ipVersion = 0
 
 		packetLength = len(packetData)
-		log.Trace("Layers: ", len(p.decoded))
 		for _, layerType := range p.decoded {
 			switch layerType {
 			case layers.LayerTypeEthernet:
@@ -303,9 +302,6 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 				if dnsRequests != nil {
 					metrics = append(metrics, dnsRequests...)
 				}
-				for _, dnsRequest := range dnsRequests {
-					log.Trace("DNS Request: ", dnsRequest)
-				}
 			}
 		}
 
@@ -317,7 +313,6 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 			destIP,
 			packetLength)
 
-		log.Trace("Packet: ", summary)
 		metrics = append(metrics, summary)
 
 		return metrics, nil
