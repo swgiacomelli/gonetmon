@@ -199,6 +199,8 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	var ethernetLayer layers.Ethernet
 	var ipv4Layer layers.IPv4
 	var ipv6Layer layers.IPv6
+	var tcpLayer layers.TCP
+	var udpLayer layers.UDP
 	var dnsLayer layers.DNS
 	var payloadLayer gopacket.Payload
 
@@ -206,6 +208,8 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	dlc = dlc.Put(&ethernetLayer)
 	dlc = dlc.Put(&ipv4Layer)
 	dlc = dlc.Put(&ipv6Layer)
+	dlc = dlc.Put(&tcpLayer)
+	dlc = dlc.Put(&udpLayer)
 	dlc = dlc.Put(&dnsLayer)
 	dlc = dlc.Put(&payloadLayer)
 
@@ -218,6 +222,8 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 			&ethernetLayer,
 			&ipv4Layer,
 			&ipv6Layer,
+			&tcpLayer,
+			&udpLayer,
 			&dnsLayer,
 			&payloadLayer,
 		},
