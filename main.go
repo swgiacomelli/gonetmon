@@ -20,6 +20,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	flag "github.com/spf13/pflag"
 
 	"github.com/google/gopacket"
@@ -63,6 +64,8 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 
 	reg.MustRegister(m.networkTraffic)
 	reg.MustRegister(m.dnsRequests)
+
+	reg.MustRegister(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics()))
 
 	return m
 }
