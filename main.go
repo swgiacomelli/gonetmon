@@ -109,28 +109,16 @@ func (p *packetSummary) String() string {
 func newPacketSummary(interfaceName string,
 	sourceMAC,
 	destinationMAC net.HardwareAddr,
-	sourceIPv4,
-	destinationIPv4,
-	sourceIPv6,
-	destinationIPv6 net.IP,
+	sourceIP,
+	destinationIP net.IP,
 	length int) *packetSummary {
 
-	if sourceIPv4 != nil || destinationIPv4 != nil {
-		return &packetSummary{
-			interfaceName:  interfaceName,
-			sourceMAC:      sourceMAC.String(),
-			destinationMAC: destinationMAC.String(),
-			sourceIP:       sourceIPv4.String(),
-			destinationIP:  destinationIPv4.String(),
-			length:         length,
-		}
-	}
 	return &packetSummary{
 		interfaceName:  interfaceName,
 		sourceMAC:      sourceMAC.String(),
 		destinationMAC: destinationMAC.String(),
-		sourceIP:       sourceIPv6.String(),
-		destinationIP:  destinationIPv6.String(),
+		sourceIP:       sourceIP.String(),
+		destinationIP:  destinationIP.String(),
 		length:         length,
 	}
 }
@@ -141,20 +129,11 @@ type dnsRequest struct {
 	dnsName       string
 }
 
-func newDNSRequests(interfaceName string, sourceIPv4, sourceIpv6 net.IP, dnsLayer *layers.DNS) []networkMetric {
+func newDNSRequests(interfaceName string, sourceIP net.IP, dnsLayer *layers.DNS) []networkMetric {
 	if dnsLayer == nil || dnsLayer.QR {
 		return nil
 	}
-
-	var srcIP string
-
-	if sourceIPv4 != nil {
-		srcIP = sourceIPv4.String()
-	} else if sourceIpv6 != nil {
-		srcIP = sourceIpv6.String()
-	} else {
-		srcIP = "unknown"
-	}
+	srcIP := sourceIP.String()
 
 	dnsRequests := make([]networkMetric, 0, len(dnsLayer.Questions))
 	for _, question := range dnsLayer.Questions {
@@ -281,9 +260,9 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 		log.Fatal(err)
 	} else {
 		var srcMAC, destMac net.HardwareAddr
-		var srcIPv4, destIPv4 net.IP
-		var srcIPv6, destIPv6 net.IP
+		var srcIP, destIP net.IP
 		var packetLength int
+		var ipVersion int
 
 		var metrics []networkMetric
 
@@ -294,6 +273,8 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 			log.Debug("Unsupported layer type: ", lt)
 		}
 
+		ipVersion = 0
+
 		packetLength = len(packetData)
 
 		for _, layerType := range p.decoded {
@@ -302,13 +283,18 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 				srcMAC = p.ethernetLayer().SrcMAC
 				destMac = p.ethernetLayer().DstMAC
 			case layers.LayerTypeIPv4:
-				srcIPv4 = p.ipv4Layer().SrcIP
-				destIPv4 = p.ipv4Layer().DstIP
+				ipVersion = 4
+				srcIP = p.ipv4Layer().SrcIP
+				destIP = p.ipv4Layer().DstIP
 			case layers.LayerTypeIPv6:
-				srcIPv6 = p.ipv6Layer().SrcIP
-				destIPv6 = p.ipv6Layer().DstIP
+				if ipVersion == 4 {
+					continue
+				}
+				ipVersion = 6
+				srcIP = p.ipv6Layer().SrcIP
+				destIP = p.ipv6Layer().DstIP
 			case layers.LayerTypeDNS:
-				dnsRequests := newDNSRequests(p.interfaceName, srcIPv4, srcIPv6, p.dnsLayer())
+				dnsRequests := newDNSRequests(p.interfaceName, srcIP, p.dnsLayer())
 				if dnsRequests != nil {
 					metrics = append(metrics, dnsRequests...)
 				}
@@ -323,10 +309,8 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 				p.interfaceName,
 				srcMAC,
 				destMac,
-				srcIPv4,
-				destIPv4,
-				srcIPv6,
-				destIPv6,
+				srcIP,
+				destIP,
 				packetLength)
 
 			log.Trace("Packet: ", summary)
