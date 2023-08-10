@@ -413,9 +413,14 @@ func initLogger() {
 func scanInterface(interfaceName string, metrics *metrics) error {
 	log.Info("Starting interface ", interfaceName, " packet capture")
 	if handle, err := pcapgo.NewEthernetHandle(interfaceName); err != nil {
-		log.Fatal(err)
+		log.Error("Error opening interface ", interfaceName, ": ", err)
+		return err
 	} else {
 		defer handle.Close()
+		if err := handle.SetPromiscuous(true); err != nil {
+			log.Error("Error setting promiscuous mode on interface ", interfaceName, ": ", err)
+			return err
+		}
 		readPackets(handle, interfaceName, metrics)
 	}
 	return nil
