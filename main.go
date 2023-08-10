@@ -176,6 +176,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	log.Trace("Creating new packet decoder")
 
 	var ethernetLayer layers.Ethernet
+	var arpLayer layers.ARP
 	var tlsLayer layers.TLS
 	var ipv4Layer layers.IPv4
 	var ipv6Layer layers.IPv6
@@ -186,6 +187,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 
 	dlc := gopacket.DecodingLayerContainer(gopacket.DecodingLayerMap{})
 	dlc = dlc.Put(&ethernetLayer)
+	dlc = dlc.Put(&arpLayer)
 	dlc = dlc.Put(&ipv4Layer)
 	dlc = dlc.Put(&ipv6Layer)
 	dlc = dlc.Put(&tcpLayer)
@@ -201,6 +203,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 		interfaceName: interfaceName,
 		layers: []interface{}{
 			&ethernetLayer,
+			&arpLayer,
 			&tlsLayer,
 			&ipv4Layer,
 			&ipv6Layer,
