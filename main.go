@@ -176,6 +176,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 	log.Trace("Creating new packet decoder")
 
 	var ethernetLayer layers.Ethernet
+	var tlsLayer layers.TLS
 	var ipv4Layer layers.IPv4
 	var ipv6Layer layers.IPv6
 	var tcpLayer layers.TCP
@@ -199,6 +200,7 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 		interfaceName: interfaceName,
 		layers: []interface{}{
 			&ethernetLayer,
+			&tlsLayer,
 			&ipv4Layer,
 			&ipv6Layer,
 			&tcpLayer,
@@ -284,9 +286,13 @@ func (p *packetDecoder) decodeMetrics(handle *pcapgo.EthernetHandle) ([]networkM
 				destMac = p.ethernetLayer().DstMAC
 			case layers.LayerTypeIPv4:
 				ipVersion = 4
+				log.Trace(p.ipv4Layer().SrcIP)
+				log.Trace(p.ipv4Layer().DstIP)
 				srcIP = p.ipv4Layer().SrcIP
 				destIP = p.ipv4Layer().DstIP
 			case layers.LayerTypeIPv6:
+				log.Trace(p.ipv6Layer().SrcIP)
+				log.Trace(p.ipv6Layer().DstIP)
 				if ipVersion == 4 {
 					continue
 				}
@@ -451,8 +457,6 @@ func getDefaultInterfaces() ([]string, error) {
 		log.Fatal(err)
 		return nil, err
 	}
-
-	log.Trace("Interfaces: ", interfaces)
 
 	var defaultInterfaces []string
 	for _, i := range interfaces {
