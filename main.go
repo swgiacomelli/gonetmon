@@ -221,8 +221,10 @@ func newPacketDecoder(interfaceName string) *packetDecoder {
 
 func (p *packetDecoder) ethernetLayer() *layers.Ethernet {
 	if m, ok := p.dlc.(gopacket.DecodingLayerMap); !ok {
+		log.Trace("Ethernet layer found")
 		return m[layers.LayerTypeEthernet].(*layers.Ethernet)
 	}
+	log.Trace("Ethernet layer not found")
 	return nil
 }
 
